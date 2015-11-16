@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-// cd kinetic/
-// go test
+// go test ./kinetic
 
 func TestPut(t *testing.T) {
 	client, _ := Connect("localhost:8123")
@@ -16,4 +15,15 @@ func TestPut(t *testing.T) {
 	if err := <-rxs; err != nil {
 		t.Errorf("got %v\nwant success", err)
 	}
+}
+
+func TestDelete(t *testing.T) {
+  client, _ := Connect("localhost:8123")
+  defer client.Close()
+
+  rxs, _ := client.Delete([]byte("Key"))
+
+  if err := <-rxs; err != nil {
+    t.Errorf("got %v\nwant success", err)
+  }
 }
