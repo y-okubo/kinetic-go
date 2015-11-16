@@ -31,7 +31,7 @@ import (
 	"io"
 	"errors"
 	
-	kproto "github.com/seagate/kinetic-go/kinetic/proto"
+	kproto "github.com/y-okubo/kinetic-go/kinetic/proto"
 )
 
 // Refactor

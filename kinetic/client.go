@@ -32,8 +32,8 @@ import (
 	"net"
 	"fmt"
 	
-	"github.com/seagate/kinetic-go/kinetic/network"
-	kproto "github.com/seagate/kinetic-go/kinetic/proto"
+	"github.com/y-okubo/kinetic-go/kinetic/network"
+	kproto "github.com/y-okubo/kinetic-go/kinetic/proto"
 )
 
 // Default credentials

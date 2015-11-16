@@ -24,7 +24,7 @@
 
 package main
 
-import "github.com/seagate/kinetic-go/kinetic"
+import "github.com/y-okubo/kinetic-go/kinetic"
 import "strconv"
 import "fmt"
 
