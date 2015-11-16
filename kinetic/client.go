@@ -67,6 +67,10 @@ type Client interface {
 	PutFrom (key []byte, length int, queue <-chan []byte) ((<-chan error), error)
 	Delete (key []byte) ((<-chan error), error)
 	Get (key []byte) ((<-chan []byte), (<-chan error), error)
+	GetVersion (key []byte) ((<-chan []byte), (<-chan error), error)
+	GetNextKey (key []byte) ((<-chan []byte), (<-chan error), error)
+	GetPreviousKey (key []byte) ((<-chan []byte), (<-chan error), error)
+	GetKeyRange (startKey []byte, endKey []byte) ((<-chan [][]byte), (<-chan error), error)
 	
 	Close()
 }
@@ -75,6 +79,7 @@ type PendingOperation struct {
 	sequence int64
 	receiver chan error
 	value    chan []byte
+	array    chan [][]byte
 }
 
 type NetworkClient struct {
@@ -140,6 +145,18 @@ func (self *NetworkClient) listen(notifications <-chan PendingOperation) {
 					case kproto.Command_GET_RESPONSE:
 						// GET
 						op.value <- value
+					case kproto.Command_GETVERSION_RESPONSE:
+						// Get Version
+						op.value <- cmd.Body.KeyValue.DbVersion
+					case kproto.Command_GETNEXT_RESPONSE:
+						// Get Next
+						op.value <- cmd.Body.KeyValue.Key
+					case kproto.Command_GETPREVIOUS_RESPONSE:
+						// Get Previous
+						op.value <- cmd.Body.KeyValue.Key
+					case kproto.Command_GETKEYRANGE_RESPONSE:
+						// Get Key Range
+						op.array <- cmd.Body.Range.Keys
 					default:
 						// PUT, DELETE
 						op.receiver <- response // TODO: send back the actual response
@@ -337,6 +354,193 @@ func(self *NetworkClient) Get(key []byte) ((<-chan []byte), (<-chan error), erro
 	self.sequence += 1
 	
 	return value, status, nil
+}
+
+// Method Get Version
+func(self *NetworkClient) GetVersion(key []byte) ((<-chan []byte), (<-chan error), error) {
+	metadataOnly := true
+
+	cmd := &kproto.Command {
+			Header: &kproto.Command_Header {
+				ConnectionID: proto.Int64(self.connectionId),
+				Sequence: proto.Int64(self.sequence),
+				MessageType: kproto.Command_GETVERSION.Enum(),
+			},
+			Body: &kproto.Command_Body {
+				KeyValue: &kproto.Command_KeyValue {
+					Key: key,
+					MetadataOnly: &metadataOnly,
+				},
+			},
+		}
+
+	cmd_bytes, err := proto.Marshal(cmd)		
+	if err != nil { return nil, nil, err }
+	
+	msg := &kproto.Message {
+			AuthType: kproto.Message_HMACAUTH.Enum(),
+			HmacAuth: &kproto.Message_HMACauth {
+				Identity: proto.Int64(self.userId),
+				Hmac: calculate_hmac(self.secret, cmd_bytes),
+			},
+			CommandBytes: cmd_bytes,
+		}
+	
+	err = network.Send(self.conn, msg, nil)	
+	if err != nil { return nil, nil, err }
+			
+	// TODO: return single chan
+	status := make(chan error, 1)		
+	value := make(chan []byte, 1)		
+	pending := PendingOperation { sequence: self.sequence, receiver: status, value: value}		
+			
+	self.notifier <- pending			
+			
+	self.sequence += 1
+	
+	return value, status, nil
+}
+
+// Method Get Next
+func(self *NetworkClient) GetNextKey(key []byte) ((<-chan []byte), (<-chan error), error) {
+	metadataOnly := true
+
+	cmd := &kproto.Command {
+			Header: &kproto.Command_Header {
+				ConnectionID: proto.Int64(self.connectionId),
+				Sequence: proto.Int64(self.sequence),
+				MessageType: kproto.Command_GETNEXT.Enum(),
+			},
+			Body: &kproto.Command_Body {
+				KeyValue: &kproto.Command_KeyValue {
+					Key: key,
+					MetadataOnly: &metadataOnly,
+				},
+			},
+		}
+
+	cmd_bytes, err := proto.Marshal(cmd)		
+	if err != nil { return nil, nil, err }
+	
+	msg := &kproto.Message {
+			AuthType: kproto.Message_HMACAUTH.Enum(),
+			HmacAuth: &kproto.Message_HMACauth {
+				Identity: proto.Int64(self.userId),
+				Hmac: calculate_hmac(self.secret, cmd_bytes),
+			},
+			CommandBytes: cmd_bytes,
+		}
+	
+	err = network.Send(self.conn, msg, nil)	
+	if err != nil { return nil, nil, err }
+			
+	// TODO: return single chan
+	status := make(chan error, 1)		
+	value := make(chan []byte, 1)		
+	pending := PendingOperation { sequence: self.sequence, receiver: status, value: value}		
+			
+	self.notifier <- pending			
+			
+	self.sequence += 1
+	
+	return value, status, nil
+}
+
+// Method Get Previous
+func(self *NetworkClient) GetPreviousKey(key []byte) ((<-chan []byte), (<-chan error), error) {
+	metadataOnly := true
+
+	cmd := &kproto.Command {
+			Header: &kproto.Command_Header {
+				ConnectionID: proto.Int64(self.connectionId),
+				Sequence: proto.Int64(self.sequence),
+				MessageType: kproto.Command_GETPREVIOUS.Enum(),
+			},
+			Body: &kproto.Command_Body {
+				KeyValue: &kproto.Command_KeyValue {
+					Key: key,
+					MetadataOnly: &metadataOnly,
+				},
+			},
+		}
+
+	cmd_bytes, err := proto.Marshal(cmd)		
+	if err != nil { return nil, nil, err }
+	
+	msg := &kproto.Message {
+			AuthType: kproto.Message_HMACAUTH.Enum(),
+			HmacAuth: &kproto.Message_HMACauth {
+				Identity: proto.Int64(self.userId),
+				Hmac: calculate_hmac(self.secret, cmd_bytes),
+			},
+			CommandBytes: cmd_bytes,
+		}
+	
+	err = network.Send(self.conn, msg, nil)	
+	if err != nil { return nil, nil, err }
+			
+	// TODO: return single chan
+	status := make(chan error, 1)		
+	value := make(chan []byte, 1)		
+	pending := PendingOperation { sequence: self.sequence, receiver: status, value: value}		
+			
+	self.notifier <- pending			
+			
+	self.sequence += 1
+	
+	return value, status, nil
+}
+
+// Method Get Key Range
+func(self *NetworkClient) GetKeyRange(startKey []byte, endKey []byte) ((<-chan [][]byte), (<-chan error), error) {
+	var startKeyInclusive bool = true
+	var endKeyInclusive bool = true
+	var maxReturned int32 = 200
+	var reverse bool = false
+
+	cmd := &kproto.Command {
+			Header: &kproto.Command_Header {
+				ConnectionID: proto.Int64(self.connectionId),
+				Sequence: proto.Int64(self.sequence),
+				MessageType: kproto.Command_GETKEYRANGE.Enum(),
+			},
+			Body: &kproto.Command_Body {
+				Range: &kproto.Command_Range {
+					StartKey: startKey,
+					StartKeyInclusive: &startKeyInclusive,
+					EndKey: endKey,
+					EndKeyInclusive: &endKeyInclusive,
+					MaxReturned: &maxReturned,
+					Reverse: &reverse,
+				},
+			},
+		}
+
+	cmd_bytes, err := proto.Marshal(cmd)		
+	if err != nil { return nil, nil, err }
+	
+	msg := &kproto.Message {
+			AuthType: kproto.Message_HMACAUTH.Enum(),
+			HmacAuth: &kproto.Message_HMACauth {
+				Identity: proto.Int64(self.userId),
+				Hmac: calculate_hmac(self.secret, cmd_bytes),
+			},
+			CommandBytes: cmd_bytes,
+		}
+	
+	err = network.Send(self.conn, msg, nil)	
+	if err != nil { return nil, nil, err }
+			
+	// TODO: return single chan
+	status := make(chan error, 1)		
+	array := make(chan [][]byte, 1)		
+	pending := PendingOperation { sequence: self.sequence, receiver: status, array: array}		
+			
+	self.notifier <- pending			
+			
+	self.sequence += 1
+	
+	return array, status, nil
 }
 
 func(self *NetworkClient) Close() {
