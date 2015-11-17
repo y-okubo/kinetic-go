@@ -10,172 +10,249 @@ import (
 // go test ./kinetic
 
 func TestPut(t *testing.T) {
-	client, _ := Connect("localhost:8123")
+  var error <-chan error
+  var value <-chan interface{}
+  var client Client
+
+	client, _ = Connect("localhost:8123")
 	defer client.Close()
 
-	rxs, _ := client.Put([]byte("Key"), []byte("Value"))
+	value, error, _ = client.Put([]byte("Key"), []byte("Value"))
 
-	if err := <-rxs; err != nil {
+  <- value
+  err := <- error
+
+	if err != nil {
 		t.Errorf("got %v\nwant success", err)
 	}
 }
 
 func TestDelete(t *testing.T) {
-  client, _ := Connect("localhost:8123")
+  var error <-chan error
+  var value <-chan interface{}
+  var client Client
+
+  client, _ = Connect("localhost:8123")
   defer client.Close()
 
-  rxs, _ := client.Delete([]byte("Key"))
+  value, error, _ = client.Delete([]byte("Key"))
 
-  if err := <-rxs; err != nil {
+  <- value
+  err := <- error
+
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 }
 
 func TestGet(t *testing.T) {
-  client, _ := Connect("localhost:8123")
+  var error <-chan error
+  var value <-chan interface{}
+  var client Client
+  var specKey, specVal string
+  var val interface{}
+  var err interface{}
+
+  client, _ = Connect("localhost:8123")
   defer client.Close()
 
   rand.Seed(time.Now().UnixNano())
-  specKey := "Key_" + strconv.FormatInt(rand.Int63(), 10)
-  specVal := "Val_" + strconv.FormatInt(rand.Int63(), 10)
+  specKey = "Key_" + strconv.FormatInt(rand.Int63(), 10)
+  specVal = "Val_" + strconv.FormatInt(rand.Int63(), 10)
 
-  rx0, _ := client.Put([]byte(specKey), []byte(specVal))
+  value, error, _ = client.Put([]byte(specKey), []byte(specVal))
   
-  if err := <-rx0; err != nil {
+  <- value
+  err = <- error
+
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  vChan, sChan, _ := client.Get([]byte(specKey))
-  select {
-  case v := <- vChan:
-    if string(v) != specVal {
-      t.Errorf("got %v\nwant %v", string(v), string(specVal))
+  value, error, _ = client.Get([]byte(specKey))
+  val = <- value
+  err = <- error
+
+  if err != nil {
+    t.Errorf("got %v\nwant success", err)
+  } else {
+    if string(val.([]byte)) != specVal {
+      t.Errorf("got %v\nwant %v", string(val.([]byte)), string(specVal))
     }
-  case s := <- sChan:
-    t.Errorf("got %v\nwant success", s)
   }
 }
 
 func TestGetVersion(t *testing.T) {
-  client, _ := Connect("localhost:8123")
+  var error <-chan error
+  var value <-chan interface{}
+  var client Client
+  var specKey, specVal string
+  var val interface{}
+  var err interface{}
+
+  client, _ = Connect("localhost:8123")
   defer client.Close()
 
   rand.Seed(time.Now().UnixNano())
-  specKey := "Key_" + strconv.FormatInt(rand.Int63(), 10)
-  specVal := "Val_" + strconv.FormatInt(rand.Int63(), 10)
+  specKey = "Key_" + strconv.FormatInt(rand.Int63(), 10)
+  specVal = "Val_" + strconv.FormatInt(rand.Int63(), 10)
 
-  rx0, _ := client.Put([]byte(specKey), []byte(specVal))
+  value, error, _ = client.Put([]byte(specKey), []byte(specVal))
+  <-value
+  err = <-error
   
-  if err := <-rx0; err != nil {
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  vChan, sChan, _ := client.GetVersion([]byte(specKey))
-  select {
-  case v := <- vChan:
-    if string(v) != "" {
-      t.Errorf("got %v\nwant %v", string(v), "")
+  value, error, _ = client.GetVersion([]byte(specKey))
+  val = <- value
+  err = <- error
+
+  if err != nil {
+    t.Errorf("got %v\nwant success", err)
+  } else {
+    if string(val.([]byte)) != "" {
+      t.Errorf("got %v\nwant %v", string(val.([]byte)), string(""))
     }
-  case s := <- sChan:
-    t.Errorf("got %v\nwant success", s)
   }
 }
 
 func TestGetNextKey(t *testing.T) {
-  client, _ := Connect("localhost:8123")
+  var error <-chan error
+  var value <-chan interface{}
+  var client Client
+  var specKey, specVal string
+  var val interface{}
+  var err interface{}
+
+  client, _ = Connect("localhost:8123")
   defer client.Close()
 
-  specKey0 := "Key_0"
-  specVal0 := "Val_0"
+  specKey = "Key_0"
+  specVal = "Val_0"
 
-  rx0, _ := client.Put([]byte(specKey0), []byte(specVal0))
+  value, error, _ = client.Put([]byte(specKey), []byte(specVal))
+  <-value
+  err = <-error
   
-  if err := <-rx0; err != nil {
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  specKey1 := "Key_1"
-  specVal1 := "Val_1"
+  specKey = "Key_1"
+  specVal = "Val_1"
 
-  rx1, _ := client.Put([]byte(specKey1), []byte(specVal1))
+  value, error, _ = client.Put([]byte(specKey), []byte(specVal))
+  <-value
+  err = <-error
   
-  if err := <-rx1; err != nil {
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  vChan, sChan, _ := client.GetNextKey([]byte(specKey0))
-  select {
-  case v := <- vChan:
-    if string(v) != specKey1 {
-      t.Errorf("got %v\nwant %v", string(v), specKey1)
+  value, error, _ = client.GetNextKey([]byte(specKey))
+  val = <-value
+  err = <-error
+
+  if err != nil {
+    t.Errorf("got %v\nwant success", err)
+  } else {
+    if string(val.([]byte)) != specKey {
+      t.Errorf("got %v\nwant %v", string(val.([]byte)), string(specKey))
     }
-  case s := <- sChan:
-    t.Errorf("got %v\nwant success", s)
   }
 }
 
 func TestGetPreviousKey(t *testing.T) {
-  client, _ := Connect("localhost:8123")
+  var error <-chan error
+  var value <-chan interface{}
+  var client Client
+  var specKey, specVal string
+  var val interface{}
+  var err interface{}
+
+  client, _ = Connect("localhost:8123")
   defer client.Close()
 
-  specKey0 := "Key_0"
-  specVal0 := "Val_0"
+  specKey = "Key_0"
+  specVal = "Val_0"
 
-  rx0, _ := client.Put([]byte(specKey0), []byte(specVal0))
+  value, error, _ = client.Put([]byte(specKey), []byte(specVal))
+  <-value
+  err = <-error
   
-  if err := <-rx0; err != nil {
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  specKey1 := "Key_1"
-  specVal1 := "Val_1"
+  specKey = "Key_1"
+  specVal = "Val_1"
 
-  rx1, _ := client.Put([]byte(specKey1), []byte(specVal1))
+  value, error, _ = client.Put([]byte(specKey), []byte(specVal))
+  <-value
+  err = <-error
   
-  if err := <-rx1; err != nil {
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  vChan, sChan, _ := client.GetPreviousKey([]byte(specKey1))
-  select {
-  case v := <- vChan:
-    if string(v) != specKey0 {
-      t.Errorf("got %v\nwant %v", string(v), specKey0)
+  value, error, _ = client.GetPreviousKey([]byte(specKey))
+  val = <-value
+  err = <-error
+
+  if err != nil {
+    t.Errorf("got %v\nwant success", err)
+  } else {
+    if string(val.([]byte)) != specKey {
+      t.Errorf("got %v\nwant %v", string(val.([]byte)), string(specKey))
     }
-  case s := <- sChan:
-    t.Errorf("got %v\nwant success", s)
   }
 }
 
 func TestGetKeyRange(t *testing.T) {
-  client, _ := Connect("localhost:8123")
+  var error <-chan error
+  var value <-chan interface{}
+  var client Client
+  var startKey, startVal string
+  var endKey, endVal string
+  var val interface{}
+  var err interface{}
+
+  client, _ = Connect("localhost:8123")
   defer client.Close()
 
-  specKey0 := "Key_0"
-  specVal0 := "Val_0"
+  startKey = "Key_0"
+  startVal = "Val_0"
 
-  rx0, _ := client.Put([]byte(specKey0), []byte(specVal0))
+  value, error, _ = client.Put([]byte(startKey), []byte(startVal))
+  <-value
+  err = <-error
   
-  if err := <-rx0; err != nil {
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  specKey1 := "Key_1"
-  specVal1 := "Val_1"
+  endKey = "Key_1"
+  endVal = "Val_1"
 
-  rx1, _ := client.Put([]byte(specKey1), []byte(specVal1))
+  value, error, _ = client.Put([]byte(endKey), []byte(endVal))
+  <-value
+  err = <-error
   
-  if err := <-rx1; err != nil {
+  if err != nil {
     t.Errorf("got %v\nwant success", err)
   }
 
-  vChan, sChan, _ := client.GetKeyRange([]byte(specKey0), []byte(specKey1))
-  select {
-  case v := <- vChan:
-    if len(v) != 2 {
-      t.Errorf("got %v\nwant %v", len(v), 2)
+  value, error, _ = client.GetKeyRange([]byte(startKey), []byte(endKey))
+  val = <- value
+  err = <- error
+
+  if err != nil {
+    t.Errorf("got %v\nwant success", err)
+  } else {
+    if len(val.([][]byte)) != 2 {
+      t.Errorf("got %v\nwant %v", len(val.([][]byte)), 2)
     }
-  case s := <- sChan:
-    t.Errorf("got %v\nwant success", s)
   }
 }

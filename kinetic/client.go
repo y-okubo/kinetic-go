@@ -63,23 +63,22 @@ func (e RemoteError) Error() string {
 }
 
 type Client interface {
-	Put (key []byte, value []byte) ((<-chan error), error)
+	Put (key []byte, value []byte) ((<-chan interface{}), (<-chan error), error)
 	PutFrom (key []byte, length int, queue <-chan []byte) ((<-chan error), error)
-	Delete (key []byte) ((<-chan error), error)
-	Get (key []byte) ((<-chan []byte), (<-chan error), error)
-	GetVersion (key []byte) ((<-chan []byte), (<-chan error), error)
-	GetNextKey (key []byte) ((<-chan []byte), (<-chan error), error)
-	GetPreviousKey (key []byte) ((<-chan []byte), (<-chan error), error)
-	GetKeyRange (startKey []byte, endKey []byte) ((<-chan [][]byte), (<-chan error), error)
+	Delete(key []byte) ((<-chan interface{}), (<-chan error), error)
+	Get (key []byte) ((<-chan interface{}), (<-chan error), error)
+	GetVersion (key []byte) ((<-chan interface{}), (<-chan error), error)
+	GetNextKey (key []byte) ((<-chan interface{}), (<-chan error), error)
+	GetPreviousKey (key []byte) ((<-chan interface{}), (<-chan error), error)
+	GetKeyRange (startKey []byte, endKey []byte) ((<-chan interface{}), (<-chan error), error)
 	
 	Close()
 }
 
 type PendingOperation struct {
 	sequence int64
-	receiver chan error
-	value    chan []byte
-	array    chan [][]byte
+	error chan error
+	value chan interface{}
 }
 
 type NetworkClient struct {
@@ -139,31 +138,31 @@ func (self *NetworkClient) listen(notifications <-chan PendingOperation) {
 			op := <-notifications
 			// Chances are, it's in order
 			if op.sequence == *cmd.Header.AckSequence {
-				if *cmd.Status.Code == kproto.Command_Status_SUCCESS {
-					// Status SUCCESS
-					switch *cmd.Header.MessageType {
-					case kproto.Command_GET_RESPONSE:
-						// GET
-						op.value <- value
-					case kproto.Command_GETVERSION_RESPONSE:
-						// Get Version
-						op.value <- cmd.Body.KeyValue.DbVersion
-					case kproto.Command_GETNEXT_RESPONSE:
-						// Get Next
-						op.value <- cmd.Body.KeyValue.Key
-					case kproto.Command_GETPREVIOUS_RESPONSE:
-						// Get Previous
-						op.value <- cmd.Body.KeyValue.Key
-					case kproto.Command_GETKEYRANGE_RESPONSE:
-						// Get Key Range
-						op.array <- cmd.Body.Range.Keys
-					default:
-						// PUT, DELETE
-						op.receiver <- response // TODO: send back the actual response
-					}
-				} else {
-					// Status FAILURE
-					op.receiver <- response // TODO: send back the actual response
+				switch *cmd.Header.MessageType {
+				case kproto.Command_GET_RESPONSE:
+					// GET
+					op.value <- value
+					op.error <- response
+				case kproto.Command_GETVERSION_RESPONSE:
+					// Get Version
+					op.value <- cmd.Body.KeyValue.DbVersion
+					op.error <- response
+				case kproto.Command_GETNEXT_RESPONSE:
+					// Get Next
+					op.value <- cmd.Body.KeyValue.Key
+					op.error <- response
+				case kproto.Command_GETPREVIOUS_RESPONSE:
+					// Get Previous
+					op.value <- cmd.Body.KeyValue.Key
+					op.error <- response
+				case kproto.Command_GETKEYRANGE_RESPONSE:
+					// Get Key Range
+					op.value <- cmd.Body.Range.Keys
+					op.error <- response
+				default:
+					// PUT, DELETE
+					op.value <- *cmd.Status.Code
+					op.error <- response
 				}
 				break
 			} else {				
@@ -171,7 +170,8 @@ func (self *NetworkClient) listen(notifications <-chan PendingOperation) {
 				pending[op.sequence] = op				 
 				op, ok := pending[*cmd.Header.AckSequence]
 				if ok { // this is the case where we missed it
-					op.receiver <- response
+					op.value <- value
+					op.error <- response
 					delete(pending, op.sequence)
 					break
 				}
@@ -184,7 +184,7 @@ func (self *NetworkClient) listen(notifications <-chan PendingOperation) {
 
 // Client implementation
 
-func(self *NetworkClient) Put(key []byte, value []byte) ((<-chan error), error) {	
+func(self *NetworkClient) Put(key []byte, value []byte) ((<-chan interface{}), (<-chan error), error) {	
 	cmd := &kproto.Command {
 			Header: &kproto.Command_Header {
 				ConnectionID: proto.Int64(self.connectionId),
@@ -202,7 +202,7 @@ func(self *NetworkClient) Put(key []byte, value []byte) ((<-chan error), error) 
 		}
 		
 	cmd_bytes, err := proto.Marshal(cmd)		
-	if err != nil { return nil, err }
+	if err != nil { return nil, nil, err }
 	
 	msg := &kproto.Message {
 			AuthType: kproto.Message_HMACAUTH.Enum(),
@@ -214,16 +214,17 @@ func(self *NetworkClient) Put(key []byte, value []byte) ((<-chan error), error) 
 		}
 	
 	err = network.Send(self.conn, msg, value)	
-	if err != nil { return nil, err }
+	if err != nil { return nil, nil, err }
 			
-	rx := make(chan error, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: rx }		
+	errChan := make(chan error, 1)
+	valChan := make(chan interface{}, 1)
+	pending := PendingOperation { sequence: self.sequence, error: errChan, value: valChan }
 			
 	self.notifier <- pending			
 			
 	self.sequence += 1
 	
-	return rx, nil
+	return valChan, errChan, nil
 }
 
 // TOOD: needs refactor
@@ -260,7 +261,7 @@ func(self *NetworkClient) PutFrom(key []byte, length int, queue <-chan []byte) (
 	if err != nil { return nil, err }
 			
 	rx := make(chan error, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: rx }		
+	pending := PendingOperation { sequence: self.sequence, error: rx }		
 			
 	self.notifier <- pending			
 			
@@ -269,7 +270,7 @@ func(self *NetworkClient) PutFrom(key []byte, length int, queue <-chan []byte) (
 	return rx, nil
 }
 
-func(self *NetworkClient) Delete(key []byte) ((<-chan error), error) {	
+func(self *NetworkClient) Delete(key []byte) ((<-chan interface{}), (<-chan error), error) {	
 	cmd := &kproto.Command {
 			Header: &kproto.Command_Header {
 				ConnectionID: proto.Int64(self.connectionId),
@@ -287,7 +288,7 @@ func(self *NetworkClient) Delete(key []byte) ((<-chan error), error) {
 		}
 
 	cmd_bytes, err := proto.Marshal(cmd)		
-	if err != nil { return nil, err }
+	if err != nil { return nil, nil, err }
 	
 	msg := &kproto.Message {
 			AuthType: kproto.Message_HMACAUTH.Enum(),
@@ -299,20 +300,21 @@ func(self *NetworkClient) Delete(key []byte) ((<-chan error), error) {
 		}
 	
 	err = network.Send(self.conn, msg, nil)	
-	if err != nil { return nil, err }
+	if err != nil { return nil, nil, err }
 			
-	rx := make(chan error, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: rx }		
+	error := make(chan error, 1)		
+	value := make(chan interface{}, 1)		
+	pending := PendingOperation { sequence: self.sequence, error: error , value: value}		
 			
 	self.notifier <- pending			
 			
 	self.sequence += 1
 	
-	return rx, nil
+	return value, error, nil
 }
 
 // Method GET
-func(self *NetworkClient) Get(key []byte) ((<-chan []byte), (<-chan error), error) {
+func(self *NetworkClient) Get(key []byte) ((<-chan interface{}), (<-chan error), error) {
 	cmd := &kproto.Command {
 			Header: &kproto.Command_Header {
 				ConnectionID: proto.Int64(self.connectionId),
@@ -344,20 +346,19 @@ func(self *NetworkClient) Get(key []byte) ((<-chan []byte), (<-chan error), erro
 	err = network.Send(self.conn, msg, nil)	
 	if err != nil { return nil, nil, err }
 	
-	// TODO: return single chan
-	status := make(chan error, 1)		
-	value := make(chan []byte, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: status, value: value}		
+	errChan := make(chan error, 1)		
+	valChan := make(chan interface{}, 1)		
+	pending := PendingOperation { sequence: self.sequence, error: errChan, value: valChan}		
 			
 	self.notifier <- pending			
 			
 	self.sequence += 1
 	
-	return value, status, nil
+	return valChan, errChan, nil
 }
 
 // Method Get Version
-func(self *NetworkClient) GetVersion(key []byte) ((<-chan []byte), (<-chan error), error) {
+func(self *NetworkClient) GetVersion(key []byte) ((<-chan interface{}), (<-chan error), error) {
 	metadataOnly := true
 
 	cmd := &kproto.Command {
@@ -389,20 +390,19 @@ func(self *NetworkClient) GetVersion(key []byte) ((<-chan []byte), (<-chan error
 	err = network.Send(self.conn, msg, nil)	
 	if err != nil { return nil, nil, err }
 			
-	// TODO: return single chan
-	status := make(chan error, 1)		
-	value := make(chan []byte, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: status, value: value}		
+	errChan := make(chan error, 1)		
+	valChan := make(chan interface{}, 1)		
+	pending := PendingOperation { sequence: self.sequence, error: errChan, value: valChan}		
 			
 	self.notifier <- pending			
 			
 	self.sequence += 1
 	
-	return value, status, nil
+	return valChan, errChan, nil
 }
 
 // Method Get Next
-func(self *NetworkClient) GetNextKey(key []byte) ((<-chan []byte), (<-chan error), error) {
+func(self *NetworkClient) GetNextKey(key []byte) ((<-chan interface{}), (<-chan error), error) {
 	metadataOnly := true
 
 	cmd := &kproto.Command {
@@ -434,20 +434,19 @@ func(self *NetworkClient) GetNextKey(key []byte) ((<-chan []byte), (<-chan error
 	err = network.Send(self.conn, msg, nil)	
 	if err != nil { return nil, nil, err }
 			
-	// TODO: return single chan
-	status := make(chan error, 1)		
-	value := make(chan []byte, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: status, value: value}		
+	errChan := make(chan error, 1)		
+	valChan := make(chan interface{}, 1)		
+	pending := PendingOperation { sequence: self.sequence, error: errChan, value: valChan}		
 			
 	self.notifier <- pending			
 			
 	self.sequence += 1
 	
-	return value, status, nil
+	return valChan, errChan, nil
 }
 
 // Method Get Previous
-func(self *NetworkClient) GetPreviousKey(key []byte) ((<-chan []byte), (<-chan error), error) {
+func(self *NetworkClient) GetPreviousKey(key []byte) ((<-chan interface{}), (<-chan error), error) {
 	metadataOnly := true
 
 	cmd := &kproto.Command {
@@ -480,19 +479,19 @@ func(self *NetworkClient) GetPreviousKey(key []byte) ((<-chan []byte), (<-chan e
 	if err != nil { return nil, nil, err }
 			
 	// TODO: return single chan
-	status := make(chan error, 1)		
-	value := make(chan []byte, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: status, value: value}		
+	errChan := make(chan error, 1)		
+	valChan := make(chan interface{}, 1)		
+	pending := PendingOperation { sequence: self.sequence, error: errChan, value: valChan}		
 			
 	self.notifier <- pending			
 			
 	self.sequence += 1
 	
-	return value, status, nil
+	return valChan, errChan, nil
 }
 
 // Method Get Key Range
-func(self *NetworkClient) GetKeyRange(startKey []byte, endKey []byte) ((<-chan [][]byte), (<-chan error), error) {
+func(self *NetworkClient) GetKeyRange(startKey []byte, endKey []byte) ((<-chan interface{}), (<-chan error), error) {
 	var startKeyInclusive bool = true
 	var endKeyInclusive bool = true
 	var maxReturned int32 = 200
@@ -532,15 +531,15 @@ func(self *NetworkClient) GetKeyRange(startKey []byte, endKey []byte) ((<-chan [
 	if err != nil { return nil, nil, err }
 			
 	// TODO: return single chan
-	status := make(chan error, 1)		
-	array := make(chan [][]byte, 1)		
-	pending := PendingOperation { sequence: self.sequence, receiver: status, array: array}		
+	errChan := make(chan error, 1)		
+	valChan := make(chan interface{}, 1)		
+	pending := PendingOperation { sequence: self.sequence, error: errChan, value: valChan}		
 			
 	self.notifier <- pending			
 			
 	self.sequence += 1
 	
-	return array, status, nil
+	return valChan, errChan, nil
 }
 
 func(self *NetworkClient) Close() {
